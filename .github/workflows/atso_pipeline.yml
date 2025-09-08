@@ -6,10 +6,12 @@ name: ATSO CI/CD Pipeline
 on:
   push:
     branches:
-      - main
+      - master  # ON AJOUTE CETTE LIGNE
+      - main    # On garde 'main' au cas où vous l'utiliseriez plus tard
       - release/*
   pull_request:
     branches:
+      - master
       - main
 
 jobs:
