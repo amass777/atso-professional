@@ -1,0 +1,98 @@
+# .github/workflows/atso_pipeline.yml
+# Pipeline de CI/CD "Zero-Trust" pour ATSO Enhanced Professional
+
+name: ATSO CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # Étape 1: Valider la qualité et la sécurité du code
+  validate_code:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+
+      - name: Mise en place de Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installation des dépendances
+        run: pip install -r requirements.txt
+
+      - name: Analyse statique du code (Linting)
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Lancement des tests unitaires
+        run: |
+          pip install pytest
+          pytest tests/unit
+
+  # Étape 2: Scanner les vulnérabilités avant de construire l'artefact
+  security_scan:
+    runs-on: ubuntu-latest
+    needs: validate_code # Dépend du succès de la validation
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+
+      - name: Scan des secrets dans le code
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
+          extra_args: --only-verified
+
+      - name: Scan des vulnérabilités des dépendances (Snyk)
+        uses: snyk/actions/python-3.11@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} # Doit être configuré dans les secrets du repo
+        with:
+          command: 'monitor'
+          args: '--file=requirements.txt --org=votre-organisation-snyk'
+
+  # Étape 3: Construire et publier l'image Docker sécurisée
+  build_and_push:
+    runs-on: ubuntu-latest
+    needs: security_scan # Dépend du succès des scans de sécurité
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+
+      - name: Scan de vulnérabilités de l'image Docker (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'Dockerfile'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Connexion à Docker Hub (ou autre registre)
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build et push de l'image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: votre-repo/atso-enhanced:${{ github.sha }}
+
+# Note : Les étapes de déploiement (CD) vers Staging et Production
+# seraient ajoutées ici, conditionnées par le succès de 'build_and_push'.
